@@ -1,6 +1,6 @@
-from PyQt6.QtWidgets import *
-from PyQt6.QtCore import *
-from PyQt6.QtGui import *
+from PySide6.QtWidgets import *
+from PySide6.QtCore import *
+from PySide6.QtGui import *
 import os
 import subprocess
 import sys
@@ -222,7 +222,8 @@ class UIHandler:
                 self.folder_btn.setEnabled(True)
 
     def on_blur_changed(self, state):
-        self.blur_input.setEnabled(state == Qt.CheckState.Checked.value)
+        # PySide6 中 state 可能是整数或枚举，Qt.CheckState.Checked.value 是通用的
+        self.blur_input.setEnabled(state == Qt.CheckState.Checked.value or state == 2)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls(): event.accept()
