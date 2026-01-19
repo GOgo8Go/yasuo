@@ -1,14 +1,11 @@
-name: 极致优化打包-PySide6-兼容版
+name: 极致压缩打包-CustomTkinter版
 
 on:
-  workflow_dispatch:
-  push:
-    tags: ['v*']
+  workflow_dispatch: # 支持手动点击运行
 
 jobs:
   build:
-    # 使用 2019 提高对旧版 Win10 的兼容性
-    runs-on: windows-2019
+    runs-on: windows-2019 # 使用 2019 保证最佳向下兼容性
     permissions:
       contents: write
 
@@ -21,69 +18,58 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 安装依赖
+      - name: 安装基础依赖
         run: |
           python -m pip install --upgrade pip
-          # 只安装核心库
-          pip install PySide6 pyinstaller
+          # 安装 CustomTkinter 和图片处理库 Pillow
+          pip install customtkinter pillow pyinstaller
 
-      - name: 准备 FFmpeg 核心
+      - name: 准备 FFmpeg 核心组件
         shell: pwsh
         run: |
-          # 下载 essentials 版本 (约 100MB)
+          # 下载 FFmpeg Release Essentials (约 100MB)
           curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
           Expand-Archive ffmpeg.zip -DestinationPath .
           $f = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
-          # 移动核心组件到根目录，确保 pyinstaller 能够抓取
+          # 提取 exe 到根目录供打包使用
           Move-Item "$($f.FullName)/bin/ffmpeg.exe" .
           Move-Item "$($f.FullName)/bin/ffprobe.exe" .
 
-      - name: 下载 UPX 压缩引擎
+      - name: 下载并准备 UPX 压缩引擎
         shell: pwsh
         run: |
           curl -L -o upx.zip https://github.com/upx/upx/releases/download/v4.2.2/upx-4.2.2-win64.zip
           Expand-Archive upx.zip -DestinationPath .
           Move-Item "upx-4.2.2-win64/upx.exe" .
 
-      - name: 执行极致打包 (文件夹模式)
+      - name: 执行单文件打包 (OneFile)
         shell: pwsh
         run: |
-          # 核心策略：
-          # 1. --onedir: 消除解压延迟，点击秒开
-          # 2. --exclude: 剔除 PySide6 中完全用不到的巨型模块，节省约 40MB+
-          # 3. --upx-dir: 对库文件进行底层压缩
-          pyinstaller --noconsole --onedir `
+          # 核心策略说明：
+          # --onefile: 封装成单个 EXE，方便分发
+          # --upx-dir: 使用 UPX 对 DLL 和可执行文件进行二次压缩
+          # --add-binary: 将 ffmpeg/ffprobe 封装进 EXE 内部
+          # --add-data: 将图标文件打包进去，供代码中 sys._MEIPASS 调用
+          pyinstaller --noconsole --onefile `
           --upx-dir=. `
           --icon="app_logo.ico" `
           --add-binary "ffmpeg.exe;." `
           --add-binary "ffprobe.exe;." `
-          --exclude-module "PySide6.QtNetwork" `
-          --exclude-module "PySide6.QtPdf" `
-          --exclude-module "PySide6.QtSvg" `
-          --exclude-module "PySide6.QtWebEngine" `
-          --exclude-module "PySide6.QtCharts" `
-          --exclude-module "PySide6.QtSql" `
+          --add-data "app_logo.ico;." `
           --name "视频比例转换器" `
           main.py
 
-      - name: 整理并压缩产物
-        shell: pwsh
-        run: |
-          # 将打包后的目录重命名并打成压缩包
-          $distPath = "dist/视频比例转换器"
-          Compress-Archive -Path $distPath -DestinationPath "VideoConverter_Portable.zip"
-
-      - name: 上传 Artifact (Actions 面板可见)
+      - name: 上传 Artifact (Actions面板可见)
         uses: actions/upload-artifact@v4
         with:
-          name: VideoConverter_Portable
-          path: VideoConverter_Portable.zip
+          name: VideoConverter_Standalone
+          path: dist/视频比例转换器.exe
 
-      - name: 发布 Release (仅在打标签时)
+      - name: 创建 GitHub Release (仅在打标签时)
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: VideoConverter_Portable.zip
+          files: dist/视频比例转换器.exe
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}
         env:
