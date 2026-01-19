@@ -10,6 +10,18 @@ from PyQt6.QtWidgets import QFrame, QLabel, QProgressBar, QPushButton, QHBoxLayo
 from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QTimer, Qt
 from PyQt6.QtGui import QPixmap
 
+# --- 新增：获取内置 FFmpeg 路径的逻辑 ---
+def get_ffmpeg_exe():
+    """如果是打包后的环境，从临时文件夹获取 exe，否则使用系统命令"""
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, "ffmpeg.exe")
+    return "ffmpeg"
+
+def get_ffprobe_exe():
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, "ffprobe.exe")
+    return "ffprobe"
+# ---------------------------------------
 
 class WorkerSignals(QObject):
     progress = pyqtSignal(str, int)
@@ -210,4 +222,5 @@ class ThumbTask(QRunnable):
         super().__init__()
         self.card = card
     def run(self):
+
         self.card._do_load()
