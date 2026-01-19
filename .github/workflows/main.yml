@@ -1,9 +1,9 @@
 name: 手动触发极致压缩打包
 
 on:
-  workflow_dispatch: # 允许手动点击按钮触发
+  workflow_dispatch:
   push:
-    tags: ['v*']     # 保留标签触发模式
+    tags: ['v*']
 
 jobs:
   build:
@@ -22,22 +22,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install PyQt6 pyinstaller
 
-      - name: 下载精简版 FFmpeg (仅 50MB 左右)
+      - name: 下载并提取 FFmpeg (最小化版)
+        shell: pwsh
         run: |
+          # 下载
           curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
-          tar -xf ffmpeg.zip
-          # 移动 exe 到根目录供打包使用
-          child_dir=$(dir ffmpeg-*-essentials_build /b)
-          move "ffmpeg-$child_dir/bin/ffmpeg.exe" .
-          move "ffmpeg-$child_dir/bin/ffprobe.exe" .
+          # 解压
+          Expand-Archive ffmpeg.zip -DestinationPath .
+          # 自动定位文件夹并移动 exe（解决版本号不确定的问题）
+          $ffmpegDir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
+          Move-Item "$($ffmpegDir.FullName)/bin/ffmpeg.exe" .
+          Move-Item "$($ffmpegDir.FullName)/bin/ffprobe.exe" .
 
       - name: 下载 UPX 压缩引擎
+        shell: pwsh
         run: |
           curl -L -o upx.zip https://github.com/upx/upx/releases/download/v4.2.2/upx-4.2.2-win64.zip
-          tar -xf upx.zip
-          move upx-4.2.2-win64/upx.exe .
+          Expand-Archive upx.zip -DestinationPath .
+          $upxDir = Get-ChildItem -Directory -Filter "upx-*" | Select-Object -First 1
+          Move-Item "$($upxDir.FullName)/upx.exe" .
 
       - name: 执行极致压缩打包
+        shell: pwsh
         run: |
           pyinstaller --noconsole --onefile `
           --upx-dir=. `
