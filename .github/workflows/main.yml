@@ -1,0 +1,52 @@
+name: 极致压缩打包
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 pyinstaller
+
+      - name: 下载 FFmpeg 核心组件
+        run: |
+          # 下载最小化的 ffmpeg 压缩包
+          curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+          tar -xf ffmpeg.zip
+          # 只把核心 exe 提取到根目录，减小体积
+          move ffmpeg-*/bin/ffmpeg.exe .
+          move ffmpeg-*/bin/ffprobe.exe .
+
+      - name: 下载并配置 UPX 压缩工具
+        run: |
+          curl -L -o upx.zip https://github.com/upx/upx/releases/download/v4.2.2/upx-4.2.2-win64.zip
+          tar -xf upx.zip
+          move upx-*/upx.exe .
+
+      - name: 执行单文件打包 (包含压缩)
+        run: |
+          ./pyinstaller --noconsole --onefile `
+          --upx-dir=. `
+          --add-binary "ffmpeg.exe;." `
+          --add-binary "ffprobe.exe;." `
+          --name "智能视频转码器" `
+          main.py
+
+      - name: 上传到 Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/智能视频转码器.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
