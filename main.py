@@ -1,7 +1,7 @@
 # main.py
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow
-from PyQt6.QtCore import QThreadPool, Qt
+from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtCore import QThreadPool, Qt
 import os
 
 from ui import UIHandler
@@ -29,4 +29,5 @@ if __name__ == "__main__":
     app.setStyle("Fusion")
     window = MainWindow()
     window.show()
+    # PySide6 推荐直接使用 exec()
     sys.exit(app.exec())
