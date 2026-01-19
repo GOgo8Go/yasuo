@@ -6,27 +6,30 @@ import string
 import sys
 import re
 
-from PyQt6.QtWidgets import QFrame, QLabel, QProgressBar, QPushButton, QHBoxLayout, QVBoxLayout, QApplication
-from PyQt6.QtCore import QObject, pyqtSignal, QRunnable, QTimer, Qt
-from PyQt6.QtGui import QPixmap
+# 仅修改导入源：从 PyQt6 切换到 PySide6
+from PySide6.QtWidgets import QFrame, QLabel, QProgressBar, QPushButton, QHBoxLayout, QVBoxLayout, QApplication
+from PySide6.QtCore import QObject, Signal, QRunnable, QTimer, Qt
+from PySide6.QtGui import QPixmap
 
-# --- 新增：获取内置 FFmpeg 路径的逻辑 ---
+# --- 路径识别逻辑：确保文件夹模式下能找到同级的 ffmpeg.exe ---
 def get_ffmpeg_exe():
-    """如果是打包后的环境，从临时文件夹获取 exe，否则使用系统命令"""
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, "ffmpeg.exe")
-    return "ffmpeg"
+    # 如果是打包后的环境，sys.executable 是 exe 所在路径
+    if getattr(sys, 'frozen', False):
+        base_path = os.path.dirname(sys.executable)
+        return os.path.join(base_path, "ffmpeg.exe")
+    return 'ffmpeg'
 
 def get_ffprobe_exe():
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, "ffprobe.exe")
-    return "ffprobe"
-# ---------------------------------------
+    if getattr(sys, 'frozen', False):
+        base_path = os.path.dirname(sys.executable)
+        return os.path.join(base_path, "ffprobe.exe")
+    return 'ffprobe'
 
 class WorkerSignals(QObject):
-    progress = pyqtSignal(str, int)
-    finished = pyqtSignal(str)
-    error = pyqtSignal(str, str)
+    # PyQt6 的 pyqtSignal 替换为 PySide6 的 Signal
+    progress = Signal(str, int)
+    finished = Signal(str)
+    error = Signal(str, str)
 
 
 class VideoWorker(QRunnable):
@@ -73,9 +76,9 @@ class VideoWorker(QRunnable):
             vf = (f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
                   f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p")
 
-        # 3. 优化参数：兼容无音轨视频 (-map 0:v? -map 0:a?)
+        # 3. 优化参数：使用 get_ffmpeg_exe() 获取路径
         cmd = [
-            'ffmpeg', '-y', '-i', self.file_path,
+            get_ffmpeg_exe(), '-y', '-i', self.file_path,
             '-vf', vf,
             '-c:v', 'libx264',
             '-preset', self.config.get('preset', 'ultrafast'),
@@ -179,9 +182,10 @@ class VideoCard(QFrame):
             self._do_load()
 
     def _do_load(self):
-        """执行具体的读取逻辑（保留原始临时文件方式，确保能显示）"""
+        """执行具体的读取逻辑"""
         try:
-            cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', self.path]
+            # 使用 get_ffprobe_exe() 获取路径
+            cmd = [get_ffprobe_exe(), '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', self.path]
             result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', 
                                     creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             data = json.loads(result.stdout)
@@ -194,9 +198,9 @@ class VideoCard(QFrame):
                 fps = video.get('r_frame_rate', '未知')
                 self.info.setText(f"{int(self.duration // 60):02d}:{int(self.duration % 60):02d} 、{res} 、{bitrate}kbps 、{fps} 、{size_mb:.1f}M")
 
-            # 抓取预览图逻辑 (保留原逻辑，确保生效)
+            # 使用 get_ffmpeg_exe()，并将 -ss 移动到 -i 前面大幅提速预览图生成
             tmp = f"tmp_thumb_{random.randint(10000,99999)}.jpg"
-            subprocess.run(['ffmpeg', '-y', '-i', self.path, '-ss', '1', '-vframes', '1', '-vf', 'scale=240:135', tmp], 
+            subprocess.run([get_ffmpeg_exe(), '-y', '-ss', '1', '-i', self.path, '-vframes', '1', '-vf', 'scale=240:135', tmp], 
                            stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=="win32" else 0)
             if os.path.exists(tmp):
                 pix = QPixmap(tmp)
@@ -222,5 +226,4 @@ class ThumbTask(QRunnable):
         super().__init__()
         self.card = card
     def run(self):
-
         self.card._do_load()
