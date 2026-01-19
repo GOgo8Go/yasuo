@@ -2,18 +2,15 @@ import os
 import subprocess
 import json
 import random
-import string
 import sys
 import re
+import threading
+from PIL import Image, ImageTk # 需要安装: pip install pillow
 
-# 仅修改导入源：从 PyQt6 切换到 PySide6
-from PySide6.QtWidgets import QFrame, QLabel, QProgressBar, QPushButton, QHBoxLayout, QVBoxLayout, QApplication
-from PySide6.QtCore import QObject, Signal, QRunnable, QTimer, Qt
-from PySide6.QtGui import QPixmap
+import customtkinter as ctk
 
-# --- 路径识别逻辑：确保文件夹模式下能找到同级的 ffmpeg.exe ---
+# --- 路径识别逻辑：确保打包后能找到 ffmpeg ---
 def get_ffmpeg_exe():
-    # 如果是打包后的环境，sys.executable 是 exe 所在路径
     if getattr(sys, 'frozen', False):
         base_path = os.path.dirname(sys.executable)
         return os.path.join(base_path, "ffmpeg.exe")
@@ -25,32 +22,25 @@ def get_ffprobe_exe():
         return os.path.join(base_path, "ffprobe.exe")
     return 'ffprobe'
 
-class WorkerSignals(QObject):
-    # PyQt6 的 pyqtSignal 替换为 PySide6 的 Signal
-    progress = Signal(str, int)
-    finished = Signal(str)
-    error = Signal(str, str)
-
-
-class VideoWorker(QRunnable):
+class VideoWorker:
+    """处理视频转换的逻辑类 (普通 Python 类，不继承 QRunnable)"""
     def __init__(self, file_path, config, duration):
-        super().__init__()
         self.file_path = file_path
         self.config = config
         self.duration = duration
-        self.signals = WorkerSignals()
+        # 定义回调函数
+        self.on_progress = None
+        self.on_finished = None
+        self.on_error = None
 
     def run(self):
-        # 1. 创建子目录 Converted_Videos
         dir_name = os.path.dirname(self.file_path)
         out_dir = os.path.join(dir_name, "Converted_Videos")
-        if not os.path.exists(out_dir):
-            os.makedirs(out_dir, exist_ok=True)
+        os.makedirs(out_dir, exist_ok=True)
 
         base_name = os.path.splitext(os.path.basename(self.file_path))[0]
         suffix = "9-16" if self.config['mode'] == "9:16" else "16-9"
         
-        # 2. 智能重命名逻辑
         output = os.path.join(out_dir, f"{base_name}_{suffix}.mp4")
         counter = 1
         while os.path.exists(output):
@@ -60,6 +50,7 @@ class VideoWorker(QRunnable):
         is_vertical = self.config['mode'] == "9:16"
         target_w, target_h = (1080, 1920) if is_vertical else (1920, 1080)
 
+        # 拼接滤镜链 (保持原逻辑不变)
         if self.config.get('blur', False):
             sigma = self.config.get('blur_sigma', 60)
             if is_vertical:
@@ -76,17 +67,13 @@ class VideoWorker(QRunnable):
             vf = (f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
                   f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p")
 
-        # 3. 优化参数：使用 get_ffmpeg_exe() 获取路径
         cmd = [
             get_ffmpeg_exe(), '-y', '-i', self.file_path,
-            '-vf', vf,
-            '-c:v', 'libx264',
+            '-vf', vf, '-c:v', 'libx264',
             '-preset', self.config.get('preset', 'ultrafast'),
             '-crf', str(self.config.get('crf', 23)),
-            '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac', '-b:a', '192k',
-            '-map', '0:v?', '-map', '0:a?',
-            '-threads', '0', output
+            '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k',
+            '-map', '0:v?', '-map', '0:a?', '-threads', '0', output
         ]
 
         try:
@@ -100,130 +87,100 @@ class VideoWorker(QRunnable):
                 if match and self.duration > 0:
                     h, m, s = map(float, match.groups())
                     curr = h * 3600 + m * 60 + s
-                    self.signals.progress.emit(self.file_path, min(int((curr / self.duration) * 100), 99))
+                    percent = min(int((curr / self.duration) * 100), 99)
+                    if self.on_progress: self.on_progress(percent)
+            
             process.wait()
             if process.returncode == 0:
-                self.signals.progress.emit(self.file_path, 100)
-                self.signals.finished.emit(output)
+                if self.on_progress: self.on_progress(100)
+                if self.on_finished: self.on_finished(output)
             else:
-                self.signals.error.emit(self.file_path, f"ffmpeg 返回码 {process.returncode}")
+                if self.on_error: self.on_error(f"FFmpeg Error {process.returncode}")
         except Exception as e:
-            self.signals.error.emit(self.file_path, f"执行异常: {str(e)}")
+            if self.on_error: self.on_error(str(e))
 
 
-class VideoCard(QFrame):
-    def __init__(self, path, delete_callback):
-        super().__init__()
+class VideoCard(ctk.CTkFrame):
+    """适配 CustomTkinter 的列表项卡片"""
+    def __init__(self, master, path, delete_callback):
+        super().__init__(master, fg_color="#17212f", border_width=1, border_color="#334155", corner_radius=12)
         self.path = path
         self.duration = 0.0
         self.delete_callback = delete_callback
-        self.setObjectName("videoCard")
-        self.setFixedHeight(160)
-        self.setStyleSheet("QFrame#videoCard { background: #17212f; border: 1px solid #334155; border-radius: 12px; }")
 
-        main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(20)
+        # 布局配置
+        self.grid_columnconfigure(1, weight=1)
+        
+        # 预览图 (使用 CTkLabel 承载)
+        self.thumb_label = ctk.CTkLabel(self, text="预览加载中...", width=240, height=135, 
+                                        fg_color="#0f1620", corner_radius=12)
+        self.thumb_label.grid(row=0, column=0, padx=16, pady=16)
 
-        self.thumb = QLabel()
-        self.thumb.setFixedSize(240, 135)
-        self.thumb.setStyleSheet("background: #0f1620; border: 2px solid #1e2a3a; border-radius: 12px;")
-        main_layout.addWidget(self.thumb)
+        # 右侧信息区
+        self.info_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.info_frame.grid(row=0, column=1, sticky="nsew", pady=16)
 
-        right_layout = QVBoxLayout()
-        right_layout.setSpacing(12)
+        self.name = ctk.CTkLabel(self.info_frame, text=os.path.basename(path), 
+                                 font=("Microsoft YaHei", 16, "bold"), text_color="#e0e7ff")
+        self.name.pack(anchor="w")
 
-        self.name = QLabel(os.path.basename(path))
-        self.name.setStyleSheet("font-size:16px; font-weight:bold; color:#e0e7ff;")
-        right_layout.addWidget(self.name)
+        self.info = ctk.CTkLabel(self.info_frame, text="读取中...", font=("Microsoft YaHei", 13), text_color="#94a3b8")
+        self.info.pack(anchor="w", pady=(2, 8))
 
-        self.info = QLabel("读取中...")
-        self.info.setStyleSheet("font-size:14px; color:#94a3b8;")
-        right_layout.addWidget(self.info)
+        # 进度条
+        self.pbar = ctk.CTkProgressBar(self.info_frame, height=12, fg_color="#1e293b", progress_color="#3b82f6")
+        self.pbar.set(0)
+        self.pbar.pack(fill="x", side="left", expand=True)
 
-        progress_layout = QHBoxLayout()
-        progress_layout.setSpacing(10)
-        self.pbar = QProgressBar()
-        self.pbar.setFixedHeight(12)
-        self.pbar.setTextVisible(False)
-        self.pbar.setStyleSheet("QProgressBar {background:#1e293b; border:none; border-radius:6px;} QProgressBar::chunk {background:#3b82f6; border-radius:6px;}")
-        progress_layout.addWidget(self.pbar, 1)
+        self.percent = ctk.CTkLabel(self.info_frame, text="0%", font=("Arial", 13, "bold"), text_color="#60a5fa", width=50)
+        self.percent.pack(side="right", padx=10)
 
-        self.percent = QLabel("0%")
-        self.percent.setStyleSheet("font-size:14px; font-weight:bold; color:#60a5fa; min-width:60px; text-align:right;")
-        progress_layout.addWidget(self.percent)
-        right_layout.addLayout(progress_layout)
+        self.status = ctk.CTkLabel(self.info_frame, text="等待", font=("Microsoft YaHei", 13), text_color="#94a3b8")
+        self.status.pack(side="bottom", anchor="w")
 
-        self.status = QLabel("等待")
-        self.status.setStyleSheet("font-size:14px; color:#94a3b8; text-align:center;")
-        right_layout.addWidget(self.status)
+        # 删除按钮
+        self.delete_btn = ctk.CTkButton(self, text="×", width=30, height=30, corner_radius=15,
+                                        fg_color="#ef4444", hover_color="#dc2626",
+                                        command=self.on_delete)
+        self.delete_btn.place(relx=1.0, x=-40, y=12)
 
-        main_layout.addLayout(right_layout, 1)
-
-        self.delete_btn = QPushButton("×")
-        self.delete_btn.setParent(self)
-        self.delete_btn.setFixedSize(32, 32)
-        self.delete_btn.setStyleSheet("QPushButton { background: rgba(239,68,68,0.8); color: white; border: none; border-radius: 16px; font-size: 18px; font-weight: bold; } QPushButton:hover { background: #ef4444; }")
-        self.delete_btn.clicked.connect(self.on_delete)
-
-        # 延迟加载，防止卡顿
-        QTimer.singleShot(50, self.load_info)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.delete_btn.move(self.width() - 48, 12)
+        # 开启线程加载视频信息
+        threading.Thread(target=self.load_info, daemon=True).start()
 
     def load_info(self):
-        # 1. 尝试使用池来管理预览图任务（防止瞬间开启几十个进程）
-        main_win = QApplication.activeWindow()
-        if hasattr(main_win, 'thumb_pool'):
-            main_win.thumb_pool.start(ThumbTask(self))
-        else:
-            self._do_load()
-
-    def _do_load(self):
-        """执行具体的读取逻辑"""
         try:
-            # 使用 get_ffprobe_exe() 获取路径
+            # 1. 获取视频元数据
             cmd = [get_ffprobe_exe(), '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', self.path]
             result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', 
-                                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+                                   creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
             data = json.loads(result.stdout)
             video = next((s for s in data.get('streams', []) if s.get('codec_type') == 'video'), None)
+            
             if video:
                 self.duration = float(data['format'].get('duration', 0))
                 size_mb = os.path.getsize(self.path) / (1024**2)
                 res = f"{video.get('width','?')}×{video.get('height','?')}"
-                bitrate = int(data['format'].get('bit_rate', 0)) // 1000 if data['format'].get('bit_rate') else '未知'
-                fps = video.get('r_frame_rate', '未知')
-                self.info.setText(f"{int(self.duration // 60):02d}:{int(self.duration % 60):02d} 、{res} 、{bitrate}kbps 、{fps} 、{size_mb:.1f}M")
+                self.info.configure(text=f"{int(self.duration // 60):02d}:{int(self.duration % 60):02d} | {res} | {size_mb:.1f}M")
 
-            # 使用 get_ffmpeg_exe()，并将 -ss 移动到 -i 前面大幅提速预览图生成
-            tmp = f"tmp_thumb_{random.randint(10000,99999)}.jpg"
-            subprocess.run([get_ffmpeg_exe(), '-y', '-ss', '1', '-i', self.path, '-vframes', '1', '-vf', 'scale=240:135', tmp], 
+            # 2. 提取预览图
+            tmp_img = f"tmp_{random.randint(1000,9999)}.jpg"
+            subprocess.run([get_ffmpeg_exe(), '-y', '-ss', '1', '-i', self.path, '-vframes', '1', '-vf', 'scale=240:135', tmp_img],
                            stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform=="win32" else 0)
-            if os.path.exists(tmp):
-                pix = QPixmap(tmp)
-                if not pix.isNull():
-                    self.thumb.setPixmap(pix.scaled(240, 135, Qt.AspectRatioMode.KeepAspectRatio))
-                os.remove(tmp)
+            
+            if os.path.exists(tmp_img):
+                img = Image.open(tmp_img)
+                ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(240, 135))
+                self.thumb_label.configure(image=ctk_img, text="")
+                os.remove(tmp_img)
         except:
-            self.info.setText("读取失败")
+            self.info.configure(text="读取失败")
 
     def on_delete(self):
         self.delete_callback(self.path, self)
 
     def update_progress(self, value):
-        self.pbar.setValue(value)
-        self.percent.setText(f"{value}%")
+        # Tkinter 更新 UI 必须在主线程，由于 CustomTkinter 的底层处理，这里直接调用通常 OK
+        self.pbar.set(value / 100)
+        self.percent.configure(text=f"{value}%")
         if value >= 100:
-            self.status.setText("✓ 完成")
-            self.status.setStyleSheet("font-size:14px; color:#10b981;")
-
-# 预览图信号量控制任务
-class ThumbTask(QRunnable):
-    def __init__(self, card):
-        super().__init__()
-        self.card = card
-    def run(self):
-        self.card._do_load()
+            self.status.configure(text="✓ 完成", text_color="#10b981")
