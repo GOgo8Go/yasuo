@@ -1,4 +1,4 @@
-name: 手动触发极致压缩打包
+name: 极致优化打包-PySide6-兼容版
 
 on:
   workflow_dispatch:
@@ -7,7 +7,11 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # 使用 2019 提高对旧版 Win10 的兼容性
+    runs-on: windows-2019
+    permissions:
+      contents: write
+
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -17,43 +21,70 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 安装打包工具
+      - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
-          pip install PyQt6 pyinstaller
+          # 只安装核心库
+          pip install PySide6 pyinstaller
 
-      - name: 下载并提取 FFmpeg (最小化版)
+      - name: 准备 FFmpeg 核心
         shell: pwsh
         run: |
-          # 下载
+          # 下载 essentials 版本 (约 100MB)
           curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
-          # 解压
           Expand-Archive ffmpeg.zip -DestinationPath .
-          # 自动定位文件夹并移动 exe（解决版本号不确定的问题）
-          $ffmpegDir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
-          Move-Item "$($ffmpegDir.FullName)/bin/ffmpeg.exe" .
-          Move-Item "$($ffmpegDir.FullName)/bin/ffprobe.exe" .
+          $f = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
+          # 移动核心组件到根目录，确保 pyinstaller 能够抓取
+          Move-Item "$($f.FullName)/bin/ffmpeg.exe" .
+          Move-Item "$($f.FullName)/bin/ffprobe.exe" .
 
       - name: 下载 UPX 压缩引擎
         shell: pwsh
         run: |
           curl -L -o upx.zip https://github.com/upx/upx/releases/download/v4.2.2/upx-4.2.2-win64.zip
           Expand-Archive upx.zip -DestinationPath .
-          $upxDir = Get-ChildItem -Directory -Filter "upx-*" | Select-Object -First 1
-          Move-Item "$($upxDir.FullName)/upx.exe" .
+          Move-Item "upx-4.2.2-win64/upx.exe" .
 
-      - name: 执行极致压缩打包
+      - name: 执行极致打包 (文件夹模式)
         shell: pwsh
         run: |
-          pyinstaller --noconsole --onefile `
+          # 核心策略：
+          # 1. --onedir: 消除解压延迟，点击秒开
+          # 2. --exclude: 剔除 PySide6 中完全用不到的巨型模块，节省约 40MB+
+          # 3. --upx-dir: 对库文件进行底层压缩
+          pyinstaller --noconsole --onedir `
           --upx-dir=. `
+          --icon="app_logo.ico" `
           --add-binary "ffmpeg.exe;." `
           --add-binary "ffprobe.exe;." `
+          --exclude-module "PySide6.QtNetwork" `
+          --exclude-module "PySide6.QtPdf" `
+          --exclude-module "PySide6.QtSvg" `
+          --exclude-module "PySide6.QtWebEngine" `
+          --exclude-module "PySide6.QtCharts" `
+          --exclude-module "PySide6.QtSql" `
           --name "视频比例转换器" `
           main.py
 
-      - name: 上传构建产物
+      - name: 整理并压缩产物
+        shell: pwsh
+        run: |
+          # 将打包后的目录重命名并打成压缩包
+          $distPath = "dist/视频比例转换器"
+          Compress-Archive -Path $distPath -DestinationPath "VideoConverter_Portable.zip"
+
+      - name: 上传 Artifact (Actions 面板可见)
         uses: actions/upload-artifact@v4
         with:
-          name: Windows-EXE
-          path: dist/视频比例转换器.exe
+          name: VideoConverter_Portable
+          path: VideoConverter_Portable.zip
+
+      - name: 发布 Release (仅在打标签时)
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: VideoConverter_Portable.zip
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
