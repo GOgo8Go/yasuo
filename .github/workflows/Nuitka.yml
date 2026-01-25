@@ -1,0 +1,87 @@
+name: Nuitka 打包 (onefile + onedir)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: 安装 Nuitka 和依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install customtkinter tkinterdnd2 nuitka
+
+    - name: 下载并提取 FFmpeg
+      shell: pwsh
+      run: |
+        curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+        Expand-Archive ffmpeg.zip -DestinationPath .
+        $ffmpegDir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
+        mkdir ffmpeg_bin
+        Move-Item "$($ffmpegDir.FullName)/bin/*" ffmpeg_bin/
+
+    - name: Nuitka 打包 onefile
+      shell: pwsh
+      run: |
+        python -m nuitka --onefile --windows-disable-console `
+          --include-module=customtkinter `
+          --include-module=tkinterdnd2 `
+          --include-data-dir=ffmpeg_bin=ffmpeg_bin `
+          --nofollow-imports `
+          --enable-plugin=tk-inter `
+          --output-dir=dist/onefile `
+          --output-filename=PROVideoProcessor-OneFile.exe `
+          main1.py
+
+    - name: Nuitka 打包 onedir
+      shell: pwsh
+      run: |
+        python -m nuitka --standalone --windows-disable-console `
+          --include-module=customtkinter `
+          --include-module=tkinterdnd2 `
+          --include-data-dir=ffmpeg_bin=ffmpeg_bin `
+          --nofollow-imports `
+          --enable-plugin=tk-inter `
+          --output-dir=dist/onedir `
+          --output-filename=PROVideoProcessor `
+          main1.py
+
+    - name: 压缩 onedir 为 zip
+      shell: pwsh
+      run: |
+        Compress-Archive -Path dist/onedir/PROVideoProcessor/* -DestinationPath dist/PROVideoProcessor-Onedir.zip -Force
+
+    - name: 上传 onefile
+      uses: actions/upload-artifact@v4
+      with:
+        name: PROVideoProcessor-OneFile
+        path: dist/onefile/PROVideoProcessor-OneFile.exe
+
+    - name: 上传 onedir zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: PROVideoProcessor-Onedir
+        path: dist/PROVideoProcessor-Onedir.zip
+
+    - name: 创建 Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          dist/onefile/PROVideoProcessor-OneFile.exe
+          dist/PROVideoProcessor-Onedir.zip
+        body: |
+          Nuitka 版本（启动更快、体积更小、无闪烁）
+          - PROVideoProcessor-OneFile.exe：单文件版
+          - PROVideoProcessor-Onedir.zip：目录版（解压后运行 exe）
