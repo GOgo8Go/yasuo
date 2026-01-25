@@ -154,7 +154,7 @@ class VideoToolApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def __init__(self):
         super().__init__()
         self.TkdndVersion = TkinterDnD._require(self)
-        self.title("PRO Video Processor")
+        self.title("视频批量编辑工具")
         self.geometry("1180x720")
         self.configure(fg_color=BG_MAIN)
 
