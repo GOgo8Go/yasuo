@@ -41,18 +41,25 @@ jobs:
           --include-data-dir=ffmpeg_bin=ffmpeg_bin `
           --enable-plugin=tk-inter `
           --assume-yes-for-downloads `
-          --output-dir=dist/onedir `
+          --output-dir=build_output `
           --output-filename=PROVideoProcessor `
           main1.py
 
     - name: 压缩 onedir 为 zip
       shell: pwsh
       run: |
-        if (-Not (Test-Path dist/onedir/PROVideoProcessor)) {
-          Write-Error "onedir 目录未生成，打包失败"
+        # Nuitka 在 standalone 模式下，默认生成的文件夹名是 [脚本名].dist
+        $distFolder = "build_output/main1.dist"
+        
+        if (-Not (Test-Path $distFolder)) {
+          Write-Error "打包文件夹 $distFolder 不存在，请检查 Nuitka 日志"
           exit 1
         }
-        Compress-Archive -Path dist/onedir/PROVideoProcessor/* -DestinationPath dist/PROVideoProcessor-Onedir.zip -Force
+        
+        # 创建存放最终产物的目录
+        mkdir -p dist
+        # 将 main1.dist 文件夹内的内容压缩
+        Compress-Archive -Path "$distFolder/*" -DestinationPath "dist/PROVideoProcessor-Onedir.zip" -Force
 
     - name: 上传 onedir zip
       uses: actions/upload-artifact@v4
