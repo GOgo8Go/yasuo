@@ -33,7 +33,7 @@ jobs:
         mkdir ffmpeg_bin
         Move-Item "$($ffmpegDir.FullName)/bin/*" ffmpeg_bin/
 
-    - name: Nuitka 编译 (Onedir 模式)
+    - name: Nuitka 打包 onedir 模式
       shell: pwsh
       run: |
         python -m nuitka --standalone `
@@ -43,7 +43,6 @@ jobs:
           --include-data-dir=ffmpeg_bin=ffmpeg_bin `
           --enable-plugin=tk-inter `
           --assume-yes-for-downloads `
-          --collect-all=customtkinter `
           --output-dir=build_output `
           --output-filename=VideoBatchEditor `
           main1.py
