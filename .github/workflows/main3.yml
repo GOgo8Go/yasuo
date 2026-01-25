@@ -34,15 +34,16 @@ jobs:
     - name: Nuitka 打包 onedir 模式
       shell: pwsh
       run: |
-        python -m nuitka --standalone --windows-disable-console `
+        python -m nuitka --standalone `
+          --windows-console-mode=disable `
           --include-module=customtkinter `
           --include-module=tkinterdnd2 `
           --include-data-dir=ffmpeg_bin=ffmpeg_bin `
-          --nofollow-imports `
           --enable-plugin=tk-inter `
+          --assume-yes-for-downloads `
           --output-dir=dist/onedir `
           --output-filename=PROVideoProcessor `
-          main1.py   # 你的主文件是 main1.py
+          main1.py
 
     - name: 压缩 onedir 为 zip
       shell: pwsh
