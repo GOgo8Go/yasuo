@@ -1,0 +1,88 @@
+name: 6-Nuitka 打包视频工具
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置 Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install customtkinter tkinterdnd2 nuitka zstandard
+
+    - name: 下载并提取 FFmpeg
+      shell: pwsh
+      run: |
+        curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+        Expand-Archive ffmpeg.zip -DestinationPath .
+        $ffmpegDir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
+        mkdir ffmpeg_bin
+        Move-Item "$($ffmpegDir.FullName)/bin/*" ffmpeg_bin/
+
+    - name: Nuitka 编译 (Onedir 模式)
+      shell: pwsh
+      run: |
+        python -m nuitka --standalone `
+          --windows-console-mode=disable `
+          --include-module=customtkinter `
+          --include-module=tkinterdnd2 `
+          --include-data-dir=ffmpeg_bin=ffmpeg_bin `
+          --enable-plugin=tk-inter `
+          --assume-yes-for-downloads `
+          --collect-all=customtkinter `
+          --output-dir=build_output `
+          --output-filename=VideoBatchEditor `
+          main1.py
+
+    - name: 整理并重命名产物
+      shell: pwsh
+      run: |
+        # 1. 创建最终发布文件夹
+        mkdir -p release
+        
+        # 2. 将 Nuitka 默认生成的 main1.dist 重命名为中文名
+        # 注意：Nuitka 默认文件夹名遵循 [入口文件名].dist
+        if (Test-Path "build_output/main1.dist") {
+            Move-Item -Path "build_output/main1.dist" -Destination "release/视频批量编辑工具"
+        } else {
+            Write-Error "Nuitka 编译未生成预期目录"
+            exit 1
+        }
+
+    - name: 压缩产物 (修复双重解压问题)
+      shell: pwsh
+      run: |
+        # 使用 /* 确保压缩的是文件夹里的内容，而不是文件夹本身
+        Compress-Archive -Path "release/视频批量编辑工具/*" -DestinationPath "release/视频批量编辑工具-v1.0.zip" -Force
+
+    - name: 上传 Artifact (Actions 页面下载)
+      uses: actions/upload-artifact@v4
+      with:
+        name: 视频批量编辑工具-Build
+        # 这里直接指向文件夹，GitHub 会自动打一个易于下载的包
+        path: release/视频批量编辑工具/
+
+    - name: 创建 GitHub Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: release/视频批量编辑工具-v1.0.zip
+        body: |
+          ### 视频批量编辑工具
+          - **启动方式**：解压后双击 `VideoBatchEditor.exe`
+          - **内置组件**：已集成 FFmpeg 和必要的运行库
+          - **特性**：Nuitka 编译版，启动速度快，无需安装 Python 环境
