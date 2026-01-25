@@ -1,0 +1,78 @@
+name: 3-Nuitka 打包 onedir 版
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: 安装 Nuitka 和依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install customtkinter tkinterdnd2 nuitka
+
+    - name: 下载并提取 FFmpeg
+      shell: pwsh
+      run: |
+        curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+        Expand-Archive ffmpeg.zip -DestinationPath .
+        $ffmpegDir = Get-ChildItem -Directory -Filter "ffmpeg-*" | Select-Object -First 1
+        mkdir ffmpeg_bin
+        Move-Item "$($ffmpegDir.FullName)/bin/*" ffmpeg_bin/
+
+    - name: Nuitka 打包 onedir 模式
+      shell: pwsh
+      run: |
+        python -m nuitka --standalone `
+          --windows-console-mode=disable `
+          --include-module=customtkinter `
+          --include-module=tkinterdnd2 `
+          --include-data-dir=ffmpeg_bin=ffmpeg_bin `
+          --enable-plugin=tk-inter `
+          --assume-yes-for-downloads `
+          --output-dir=build_output `
+          --output-filename=PROVideoProcessor `
+          main1.py
+
+    - name: 压缩 onedir 为 zip
+      shell: pwsh
+      run: |
+        # Nuitka 在 standalone 模式下，默认生成的文件夹名是 [脚本名].dist
+        $distFolder = "build_output/main1.dist"
+        
+        if (-Not (Test-Path $distFolder)) {
+          Write-Error "打包文件夹 $distFolder 不存在，请检查 Nuitka 日志"
+          exit 1
+        }
+        
+        # 创建存放最终产物的目录
+        mkdir -p dist
+        # 将 main1.dist 文件夹内的内容压缩
+        Compress-Archive -Path "$distFolder/*" -DestinationPath "dist/PROVideoProcessor-Onedir.zip" -Force
+
+    - name: 上传 onedir zip
+      uses: actions/upload-artifact@v4
+      with:
+        name: PROVideoProcessor-Onedir
+        path: dist/PROVideoProcessor-Onedir.zip
+
+    - name: 创建 Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/PROVideoProcessor-Onedir.zip
+        body: |
+          Nuitka onedir 版本（启动更快、无闪烁、体积更小）
+          使用方法：下载 zip → 解压文件夹 → 双击 PROVideoProcessor.exe
+          已内置 ffmpeg，无需额外下载
