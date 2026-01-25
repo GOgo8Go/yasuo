@@ -1,4 +1,4 @@
-name: Nuitka 打包 (onefile + onedir)
+name: 2Nuitka 打包 onedir 版
 
 on:
   workflow_dispatch:
@@ -31,21 +31,7 @@ jobs:
         mkdir ffmpeg_bin
         Move-Item "$($ffmpegDir.FullName)/bin/*" ffmpeg_bin/
 
-    - name: Nuitka 打包 onefile
-      shell: pwsh
-      run: |
-        python -m nuitka --onefile --windows-disable-console `
-          --include-module=customtkinter `
-          --include-module=tkinterdnd2 `
-          --include-data-dir=ffmpeg_bin=ffmpeg_bin `
-          --nofollow-imports `
-          --enable-plugin=tk-inter `
-          --noinclude-dll-dependency-scan `
-          --output-dir=dist/onefile `
-          --output-filename=PROVideoProcessor-OneFile.exe `
-          main1.py   # 注意你的文件是 main1.py
-
-    - name: Nuitka 打包 onedir
+    - name: Nuitka 打包 onedir 模式
       shell: pwsh
       run: |
         python -m nuitka --standalone --windows-disable-console `
@@ -54,25 +40,18 @@ jobs:
           --include-data-dir=ffmpeg_bin=ffmpeg_bin `
           --nofollow-imports `
           --enable-plugin=tk-inter `
-          --noinclude-dll-dependency-scan `
           --output-dir=dist/onedir `
           --output-filename=PROVideoProcessor `
-          main1.py
+          main1.py   # 你的主文件是 main1.py
 
     - name: 压缩 onedir 为 zip
       shell: pwsh
       run: |
         if (-Not (Test-Path dist/onedir/PROVideoProcessor)) {
-          Write-Error "onedir 目录未生成"
+          Write-Error "onedir 目录未生成，打包失败"
           exit 1
         }
         Compress-Archive -Path dist/onedir/PROVideoProcessor/* -DestinationPath dist/PROVideoProcessor-Onedir.zip -Force
-
-    - name: 上传 onefile
-      uses: actions/upload-artifact@v4
-      with:
-        name: PROVideoProcessor-OneFile
-        path: dist/onefile/PROVideoProcessor-OneFile.exe
 
     - name: 上传 onedir zip
       uses: actions/upload-artifact@v4
@@ -84,6 +63,8 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
-        files: |
-          dist/onefile/PROVideoProcessor-OneFile.exe
-          dist/PROVideoProcessor-Onedir.zip
+        files: dist/PROVideoProcessor-Onedir.zip
+        body: |
+          Nuitka onedir 版本（启动更快、无闪烁、体积更小）
+          使用方法：下载 zip → 解压文件夹 → 双击 PROVideoProcessor.exe
+          已内置 ffmpeg，无需额外下载
