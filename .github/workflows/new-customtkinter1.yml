@@ -53,7 +53,7 @@ jobs:
           --add-binary "ffprobe.exe;." `
           --name "视频比例转换器" `
           --exclude-module matplotlib --exclude-module numpy --exclude-module pandas --exclude-module scipy --exclude-module PIL --exclude-module torch
-          main1.py   # ← 如果你的主文件不是 main.py，这里改成你的文件名
+        main1.py   # ← 如果你的主文件不是 main.py，这里改成你的文件名
 
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
