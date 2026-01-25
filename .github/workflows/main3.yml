@@ -24,7 +24,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install customtkinter tkinterdnd2 pyinstaller
 
-    - name: 下载并提取 FFmpeg (essentials 版)
+    - name: 下载并提取 FFmpeg (最小化版)
       shell: pwsh
       run: |
         curl -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
@@ -51,8 +51,8 @@ jobs:
           --add-binary "ffprobe.exe;." `
           --exclude-module matplotlib --exclude-module numpy --exclude-module pandas `
           --exclude-module scipy --exclude-module PIL `
-          --name "视频转换工具" `
-          main1.py
+          --name "PROVideoProcessor-OneFile" `
+          main.py
 
     - name: 打包 onedir 版本 (目录模式)
       shell: pwsh
@@ -64,13 +64,19 @@ jobs:
           --add-binary "ffprobe.exe;." `
           --exclude-module matplotlib --exclude-module numpy --exclude-module pandas `
           --exclude-module scipy --exclude-module PIL `
-          --name "视频转换工具" `
-          main1.py
+          --name "PROVideoProcessor-Onedir" `
+          main.py
 
     - name: 压缩 onedir 文件夹为 zip
       shell: pwsh
       run: |
-        Compress-Archive -Path dist/PROVideoProcessor-Onedir -DestinationPath dist/PROVideoProcessor-Onedir.zip
+        # 先检查目录是否存在
+        if (-Not (Test-Path dist/PROVideoProcessor-Onedir)) {
+          Write-Error "onedir 目录未生成，打包可能失败"
+          exit 1
+        }
+        # 压缩整个目录（包含 exe 和所有文件）
+        Compress-Archive -Path dist/PROVideoProcessor-Onedir/* -DestinationPath dist/PROVideoProcessor-Onedir.zip -Force
 
     - name: 上传构建产物 (onefile)
       uses: actions/upload-artifact@v4
