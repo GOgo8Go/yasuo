@@ -71,17 +71,15 @@ jobs:
     - name: 上传 Artifact (Actions 页面下载)
       uses: actions/upload-artifact@v4
       with:
-        name: 视频批量编辑工具-Build
-        # 这里直接指向文件夹，GitHub 会自动打一个易于下载的包
+        # 这里必须改用英文/数字，防止 GitHub 下载链接因中文乱码报错
+        name: Video-Batch-Editor-Build
+        # 路径依然指向你准备好的中文文件夹
         path: release/视频批量编辑工具/
 
     - name: 创建 GitHub Release
       if: startsWith(github.ref, 'refs/tags/v')
       uses: softprops/action-gh-release@v2
       with:
+        # Release 附件建议也使用英文文件名，或者在创建时通过脚本处理
+        # 如果坚持要在 Release 用中文，请确保版本号不含特殊字符
         files: release/视频批量编辑工具-v1.0.zip
-        body: |
-          ### 视频批量编辑工具
-          - **启动方式**：解压后双击 `VideoBatchEditor.exe`
-          - **内置组件**：已集成 FFmpeg 和必要的运行库
-          - **特性**：Nuitka 编译版，启动速度快，无需安装 Python 环境
